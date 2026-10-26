@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="AI 그림 파일에 숨은 프롬프트와 설정값을 찾아 주는 도구">
+<title>메타데이터 돋보기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* 좁은 단일 열: 파일 넣는 칸 → 파일마다 결과 묶음(결론 → 프롬프트 → 진단 → 전체 목록 → 파일 구조) */
+:root{
+  --bg:#eef2f3; --panel:#ffffff; --fg:#1d2a2b; --mute:#6b7b7d; --line:#d7e0e1;
+  --accent:#2f5a55; --accent-soft:#dcebe8; --ice:#bfdde3;
+  --amber:#8a6512; --amber-soft:#f6ecd2; --warn:#9a4a2a; --warn-soft:#f6e3db; --code:#f5f8f8;
+  --f-body:"Noto Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#131a1b; --panel:#1b2425; --fg:#e3ecec; --mute:#8fa1a2; --line:#2c3a3b;
+  --accent:#8cc7bd; --accent-soft:#223634; --ice:#2b4a50;
+  --amber:#e0c070; --amber-soft:#36301c; --warn:#e8a487; --warn-soft:#3a2620; --code:#162021; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#131a1b; --panel:#1b2425; --fg:#e3ecec; --mute:#8fa1a2; --line:#2c3a3b;
+  --accent:#8cc7bd; --accent-soft:#223634; --ice:#2b4a50;
+  --amber:#e0c070; --amber-soft:#36301c; --warn:#e8a487; --warn-soft:#3a2620; --code:#162021; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:13px;line-height:1.6;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 48px}
+.wrap{max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header h1{font-size:19px;font-weight:700;margin:0;letter-spacing:-.01em}
+header p{margin:4px 0 0;color:var(--mute);font-size:12px}
+.checks{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.checks span{font-size:10.5px;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute);background:var(--panel)}
+.drop{position:relative;border:1.5px dashed var(--ice);background:var(--panel);border-radius:10px;padding:22px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;display:block}
+.drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.drop b{display:block;font-size:13px;font-weight:500}
+.drop span{display:block;color:var(--mute);font-size:11.5px;margin-top:3px}
+#results{display:flex;flex-direction:column;gap:28px}
+.file{display:flex;flex-direction:column;gap:10px}
+.fhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.fhead b{font-family:var(--f-mono);font-size:12px;font-weight:500;word-break:break-all;min-width:0}
+/* 지우기 버튼 */
+.del{margin-left:auto;flex:none;font:inherit;font-size:11px;border:1px solid var(--line);background:transparent;color:var(--mute);border-radius:5px;padding:2px 9px;cursor:pointer}
+.del:hover{border-color:var(--warn);color:var(--warn)}
+.del:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.bar{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:11.5px;color:var(--mute)}
+.bar[hidden]{display:none}
+.fhead span{font-size:11px;color:var(--mute);font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font-size:10.5px;padding:1px 7px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
+.status{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:8px;font-size:12px;background:var(--accent-soft)}
+.status .dot{flex:none;width:7px;height:7px;border-radius:50%;margin-top:7px;background:var(--accent)}
+.status.part{background:var(--amber-soft)} .status.part .dot{background:var(--amber)}
+.status.no{background:var(--warn-soft)} .status.no .dot{background:var(--warn)}
+.status small{display:block;color:var(--mute);font-size:11.5px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.card-h{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--line)}
+.card-h h2{margin:0;font-size:11px;font-weight:500;letter-spacing:.05em;color:var(--mute);min-width:0}
+.copy{flex:none;font:inherit;font-size:11px;border:1px solid var(--line);background:transparent;color:var(--fg);border-radius:5px;padding:3px 9px;cursor:pointer}
+.copy:hover{border-color:var(--accent);color:var(--accent)}
+.copy:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.copy.done{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+pre{margin:0;padding:10px 12px;font-family:var(--f-mono);font-size:11.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word;background:var(--code);max-height:240px;overflow:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(125px,1fr));gap:1px;background:var(--line);margin:0}
+.grid div{background:var(--panel);padding:7px 12px;min-width:0}
+.grid dt{font-size:10.5px;color:var(--mute)}
+.grid dd{margin:0;font-family:var(--f-mono);font-size:12px;font-variant-numeric:tabular-nums;word-break:break-all}
+.diag{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 12px}
+.diag h3{margin:0 0 4px;font-size:11px;font-weight:500;color:var(--mute);letter-spacing:.05em}
+.diag ul{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:3px;font-size:12px}
+details{background:var(--panel);border:1px solid var(--line);border-radius:8px}
+summary{cursor:pointer;padding:8px 12px;font-size:12px;color:var(--mute)}
+summary:focus-visible{outline:2px solid var(--accent)}
+.tbl-wrap{overflow-x:auto;border-top:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-weight:500;color:var(--mute);font-size:10.5px;white-space:nowrap}
+td.v{font-family:var(--f-mono);word-break:break-word;white-space:pre-wrap;min-width:160px}
+td.v .more{display:block;max-height:120px;overflow:auto}
+td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
+.notes{font-size:12px;color:var(--mute);border-top:1px solid var(--line);padding-top:14px}
+.notes h3{font-size:12px;color:var(--fg);margin:0 0 6px;font-weight:500}
+.notes ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>메타데이터 돋보기</h1>
+    <p>AI 그림 파일을 구석구석 뜯어서 남아 있는 프롬프트·설정값을 찾아요. 파일은 이 화면 안에서만 읽고 어디에도 올라가지 않아요.</p>
+    <div class="checks"><span>PNG 글 조각</span><span>EXIF 전체 칸</span><span>XMP</span><span>JPG 주석</span><span>투명도 속 숨은 정보</span><span>색상 속 숨은 정보</span><span>잘린 정보 일부 건지기</span><span>파일 끝 숨은 데이터</span><span>노벨AI · 웹UI · ComfyUI</span><span>지워진 이유 진단</span></div>
+  </header>
+
+  <label class="drop" id="drop">
+    <input type="file" id="pick" multiple accept="image/*,.webp,.png,.jpg,.jpeg,.avif,.heic">
+    <b>사진 파일을 끌어다 놓거나 눌러서 고르기</b>
+    <span>여러 장 한꺼번에 돼요 · 붙여넣기는 정보가 빠지니 꼭 파일로 넣어 주세요</span>
+  </label>
+
+  <div class="bar" id="bar" hidden><span id="barText"></span><button class="del" type="button" id="clearAll">전부 지우기</button></div>
+  <div id="results"></div>
+
+  <div class="notes">
+    <h3>꼭 알아두기</h3>
+    <ul>
+      <li>그림을 복사해서 붙여넣거나, 화면 캡처를 하면 정보가 처음부터 없어요. 다운로드한 파일 그대로 넣어 주세요.</li>
+      <li>카톡·트위터·디스코드·핀터레스트 등은 올릴 때 정보를 지우는 경우가 많아요.</li>
+      <li>클립 스튜디오·포토샵 등에서 잘라서 다시 저장하면 정보가 덮여요. 단, 오른쪽만 잘랐다면 투명도 속 정보가 살아 있을 수 있어요.</li>
+      <li>지워지거나 덮인 정보는 어떤 프로그램으로도 되살릴 수 없어요. 이 도구는 남아 있는 조각을 빠짐없이 찾는 데까지예요.</li>
+    </ul>
+  </div>
+</div>
+
+<script>/* 메타데이터 분석 핵심 기능 — 화면과 상관없는 순수 계산 */
+var MetaCore = (function () {
+  var U8 = new TextDecoder('utf-8');
+  var L1 = new TextDecoder('latin1');
+
+  function asc(b, s, n) { var r = ''; for (var i = 0; i < n && s + i < b.length; i++) r += String.fromCharCode(b[s + i]); return r; }
+  function u32be(b, i) { return ((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]) >>> 0; }
+  function u32le(b, i) { return (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0; }
+  function find(b, pat, from) {
+    var f = pat[0];
+    for (var i = from || 0; i <= b.length - pat.length; i++) {
+      if (b[i] !== f) continue;
+      var ok = true; for (var j = 1; j < pat.length; j++) if (b[i + j] !== pat[j]) { ok = false; break; }
+      if (ok) return i;
+    }
+    return -1;
+  }
+  function bytesOf(s) { var a = []; for (var i = 0; i < s.length; i++) a.push(s.charCodeAt(i)); return a; }
+  function clean(s) { return String(s).replace(/\u0000+$/g, '').replace(/^\u0000+/g, ''); }
+  function printableRatio(s) { if (!s.length) return 0; var m = s.match(/[\x20-\x7e\n\r\t -ɏ　-鿿가-힯]/g); return (m ? m.length : 0) / s.length; }
+
+  /* 압축 풀기: 중간에 깨져도 풀린 데까지는 돌려줌 */
+  async function inflate(bytes, fmt) {
+    if (typeof DecompressionStream === 'undefined') return { data: null, partial: false, error: true };
+    var parts = [], total = 0, partial = false;
+    try {
+      var ds = new DecompressionStream(fmt);
+      var w = ds.writable.getWriter();
+      w.write(bytes).catch(function () {}); w.close().catch(function () {});
+      var r = ds.readable.getReader();
+      while (true) {
+        var x;
+        try { x = await r.read(); } catch (e) { partial = true; break; }
+        if (x.done) break;
+        parts.push(x.value); total += x.value.length;
+      }
+    } catch (e) { partial = true; }
+    var out = new Uint8Array(total), o = 0;
+    parts.forEach(function (p) { out.set(p, o); o += p.length; });
+    return { data: out, partial: partial, error: total === 0 && partial };
+  }
+
+  /* ---------- EXIF(TIFF) ---------- */
+  var TAGS = {
+    0x010E: '이미지 설명', 0x010F: '기기 제조사', 0x0110: '기기 모델', 0x0131: '프로그램', 0x0132: '수정 날짜',
+    0x013B: '작가', 0x8298: '저작권', 0x9003: '만든 날짜', 0x9004: '디지털화 날짜', 0x9286: '사용자 설명',
+    0x9C9B: '윈도우 제목', 0x9C9C: '윈도우 설명', 0x9C9D: '윈도우 작성자', 0x9C9E: '윈도우 키워드', 0x9C9F: '윈도우 주제',
+    0xA002: '가로 픽셀', 0xA003: '세로 픽셀', 0xA420: '고유 ID', 0x0112: '방향', 0x011A: '가로 해상도', 0x011B: '세로 해상도',
+    0xA001: '색 공간', 0x9000: 'EXIF 버전', 0x0213: 'YCbCr 배치'
+  };
+  var TSIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
+  function decodeUserComment(v) {
+    var head = asc(v, 0, 8), body = v.subarray(8);
+    if (head.indexOf('UNICODE') === 0) {
+      var le = new TextDecoder('utf-16le').decode(body), be = new TextDecoder('utf-16be').decode(body);
+      return clean(printableRatio(le) >= printableRatio(be) ? le : be);
+    }
+    if (head.indexOf('ASCII') === 0 || head === '\0\0\0\0\0\0\0\0') return clean(U8.decode(body));
+    if (head.indexOf('JIS') === 0) return clean(new TextDecoder('shift_jis').decode(body));
+    return clean(U8.decode(v));
+  }
+  function parseTIFF(b, base, src) {
+    var items = [];
+    if (base + 8 > b.length) return items;
+    var bo = asc(b, base, 2), le = bo === 'II';
+    if (bo !== 'II' && bo !== 'MM') return items;
+    function u16(i) { return le ? (b[i] | (b[i + 1] << 8)) : ((b[i] << 8) | b[i + 1]); }
+    function u32(i) { return le ? u32le(b, i) : u32be(b, i); }
+    var seen = {};
+    function ifd(off, depth) {
+      off = base + off;
+      if (seen[off] || depth > 4 || off + 2 > b.length) return; seen[off] = 1;
+      var n = u16(off); if (n > 500) return;
+      for (var k = 0; k < n; k++) {
+        var e = off + 2 + k * 12; if (e + 12 > b.length) return;
+        var tag = u16(e), type = u16(e + 2), cnt = u32(e + 4), size = (TSIZE[type] || 1) * cnt;
+        var vo = size > 4 ? base + u32(e + 8) : e + 8;
+        if (tag === 0x8769 || tag === 0xA005) { ifd(u32(e + 8), depth + 1); continue; }
+        if (tag === 0x8825) continue;
+        if (vo + size > b.length || size > 4000000) continue;
+        var raw = b.subarray(vo, vo + size), val;
+        if (tag === 0x9286) val = decodeUserComment(raw);
+        else if (tag >= 0x9C9B && tag <= 0x9C9F) val = clean(new TextDecoder('utf-16le').decode(raw));
+        else if (type === 2) val = clean(U8.decode(raw));
+        else if (type === 7) val = printableRatio(L1.decode(raw)) > .9 ? clean(U8.decode(raw)) : '(' + size + '바이트 데이터)';
+        else if (type === 3) { var a = []; for (var j = 0; j < Math.min(cnt, 8); j++) a.push(u16(vo + j * 2)); val = a.join(', '); }
+        else if (type === 4) { var c = []; for (var j2 = 0; j2 < Math.min(cnt, 8); j2++) c.push(u32(vo + j2 * 4)); val = c.join(', '); }
+        else if (type === 5) { var r = []; for (var j3 = 0; j3 < Math.min(cnt, 4); j3++) { var d = u32(vo + j3 * 8 + 4); r.push(d ? +(u32(vo + j3 * 8) / d).toFixed(4) : 0); } val = r.join(', '); }
+        else if (type === 1) val = printableRatio(L1.decode(raw)) > .9 ? clean(U8.decode(raw)) : '(' + size + '바이트)';
+        else continue;
+        items.push({ src: src, name: TAGS[tag] || ('태그 0x' + tag.toString(16).toUpperCase()), value: String(val) });
+      }
+      var next = u32(off + 2 + n * 12);
+      if (next && depth === 0) ifd(next, depth + 1);
+    }
+    ifd(u32(base + 4), 0);
+    return items;
+  }
+  function exifBlock(b, start, end, src) {
+    var s = start;
+    if (asc(b, s, 6) === 'Exif\0\0') s += 6;
+    return parseTIFF(b.subarray(0, end), s, src);
+  }
+
+  /* ---------- PNG ---------- */
+  async function parsePNG(b, R) {
+    var i = 8;
+    while (i + 12 <= b.length) {
+      var len = u32be(b, i), type = asc(b, i + 4, 4), d = b.subarray(i + 8, Math.min(b.length, i + 8 + len));
+      R.structure.push({ name: type, size: len, note: CHUNK_NOTE[type] || '' });
+      try {
+        if (type === 'tEXt') { var z = d.indexOf(0); R.items.push({ src: 'PNG 글 조각', name: L1.decode(d.subarray(0, z)), value: U8.decode(d.subarray(z + 1)) }); }
+        else if (type === 'zTXt') { var z2 = d.indexOf(0), r2 = await inflate(d.subarray(z2 + 2), 'deflate'); R.items.push({ src: 'PNG 압축 글 조각', name: L1.decode(d.subarray(0, z2)), value: U8.decode(r2.data || new Uint8Array()), partial: r2.partial }); }
+        else if (type === 'iTXt') {
+          var p = d.indexOf(0), key = L1.decode(d.subarray(0, p)), comp = d[p + 1];
+          var q = d.indexOf(0, p + 3); q = d.indexOf(0, q + 1);
+          var body = d.subarray(q + 1), txt;
+          if (comp) { var r3 = await inflate(body, 'deflate'); txt = U8.decode(r3.data || new Uint8Array()); } else txt = U8.decode(body);
+          R.items.push({ src: 'PNG 국제 글 조각', name: key, value: txt });
+        }
+        else if (type === 'eXIf') R.items = R.items.concat(exifBlock(b, i + 8, i + 8 + len, 'PNG EXIF'));
+        else if (type === 'IHDR') { R.width = u32be(d, 0); R.height = u32be(d, 4); R.colorType = d[9]; R.bitDepth = d[8]; }
+        else if (type === 'caBX') R.c2pa = true;
+      } catch (e) {}
+      if (type === 'IEND') { var end = i + 12 + len; if (end < b.length) R.trailing = b.subarray(end); break; }
+      i += 12 + len;
+    }
+  }
+  var CHUNK_NOTE = { IHDR: '그림 기본 정보', IDAT: '그림 데이터', IEND: '파일 끝', tEXt: '글 정보', zTXt: '압축된 글 정보', iTXt: '글 정보', eXIf: 'EXIF 정보', iCCP: '색상 프로필', sRGB: '색 공간', pHYs: '해상도', gAMA: '감마', cHRM: '색 기준', tIME: '수정 시각', caBX: '콘텐츠 출처(C2PA)', PLTE: '팔레트', tRNS: '투명색', bKGD: '배경색', acTL: '움직이는 PNG', fcTL: '프레임', fdAT: '프레임 데이터' };
+
+  /* ---------- JPG ---------- */
+  function parseJPEG(b, R) {
+    var i = 2;
+    while (i + 4 <= b.length) {
+      if (b[i] !== 0xFF) { i++; continue; }
+      var m = b[i + 1];
+      if (m === 0xFF) { i++; continue; }
+      if (m === 0xD8 || (m >= 0xD0 && m <= 0xD7) || m === 0x01) { i += 2; continue; }
+      var len = (b[i + 2] << 8) | b[i + 3], s = i + 4, e = i + 2 + len, d = b.subarray(s, Math.min(e, b.length));
+      var name = 'FF' + m.toString(16).toUpperCase(), note = '';
+      if (m === 0xC0 || m === 0xC2 || m === 0xC1) { R.height = (d[1] << 8) | d[2]; R.width = (d[3] << 8) | d[4]; note = '그림 크기'; }
+      if (m === 0xE0) note = asc(d, 0, 4) === 'JFIF' ? 'JFIF 기본' : 'APP0';
+      if (m === 0xE1) {
+        if (asc(d, 0, 6) === 'Exif\0\0') { note = 'EXIF 정보'; R.items = R.items.concat(exifBlock(b, s, e, 'JPG EXIF')); }
+        else if (asc(d, 0, 28) === 'http://ns.adobe.com/xap/1.0/') { note = 'XMP 정보'; R.items.push({ src: 'XMP', name: 'XMP 원문', value: U8.decode(d.subarray(29)) }); }
+        else note = 'APP1';
+      }
+      if (m === 0xE2) note = asc(d, 0, 11) === 'ICC_PROFILE' ? '색상 프로필' : 'APP2';
+      if (m === 0xED) note = '포토샵 정보';
+      if (m === 0xEB) { note = 'JUMBF / 콘텐츠 출처(C2PA)'; R.c2pa = true; }
+      if (m === 0xEE) note = 'Adobe';
+      if (m === 0xFE) { note = '주석'; R.items.push({ src: 'JPG 주석', name: '주석(COM)', value: U8.decode(d) }); }
+      if (m === 0xDB) note = '압축표'; if (m === 0xC4) note = '압축표';
+      if (m === 0xDA) {
+        note = '그림 데이터';
+        R.structure.push({ name: name, size: len, note: note });
+        var eoi = -1;
+        for (var k = b.length - 2; k > e; k--) if (b[k] === 0xFF && b[k + 1] === 0xD9) { eoi = k; break; }
+        if (eoi > 0 && eoi + 2 < b.length) R.trailing = b.subarray(eoi + 2);
+        return;
+      }
+      R.structure.push({ name: name, size: len, note: note });
+      i = e;
+    }
+  }
+
+  /* ---------- WebP ---------- */
+  function parseWebP(b, R) {
+    var riff = u32le(b, 4) + 8, i = 12;
+    while (i + 8 <= Math.min(riff, b.length)) {
+      var id = asc(b, i, 4), len = u32le(b, i + 4), d = b.subarray(i + 8, Math.min(b.length, i + 8 + len));
+      var note = { 'VP8 ': '그림 데이터(손실 압축)', 'VP8L': '그림 데이터(무손실)', VP8X: '확장 정보', ALPH: '투명도', ICCP: '색상 프로필', EXIF: 'EXIF 정보', 'XMP ': 'XMP 정보', ANIM: '움직이는 그림', ANMF: '프레임' }[id] || '';
+      R.structure.push({ name: id.trim(), size: len, note: note });
+      if (id === 'VP8 ') { R.lossy = true; R.width = ((d[6] | (d[7] << 8)) & 0x3fff); R.height = ((d[8] | (d[9] << 8)) & 0x3fff); }
+      if (id === 'VP8L') { R.lossy = false; var bits = u32le(d, 1); R.width = (bits & 0x3fff) + 1; R.height = ((bits >> 14) & 0x3fff) + 1; }
+      if (id === 'VP8X') { R.width = 1 + (d[4] | (d[5] << 8) | (d[6] << 16)); R.height = 1 + (d[7] | (d[8] << 8) | (d[9] << 16)); }
+      if (id === 'EXIF') R.items = R.items.concat(exifBlock(b, i + 8, i + 8 + len, 'WebP EXIF'));
+      if (id === 'XMP ') R.items.push({ src: 'XMP', name: 'XMP 원문', value: U8.decode(d) });
+      i += 8 + len + (len & 1);
+    }
+    if (riff < b.length) R.trailing = b.subarray(riff);
+  }
+
+  /* ---------- 파일 어디든 남은 조각 훑기 ---------- */
+  function scanLoose(b, R) {
+    var str = U8.decode(b), keys = ['{"prompt"', '{"Comment"', '{"uc"', '{"steps"', '{"v4_prompt"', '{"workflow"', '{"1":', '{"3":'];
+    var have = R.items.map(function (x) { return x.value; }).join('\n');
+    keys.forEach(function (k) {
+      var i = 0;
+      while ((i = str.indexOf(k, i)) >= 0) {
+        var depth = 0, inS = false, es = false, j = i;
+        for (; j < str.length; j++) {
+          var c = str[j];
+          if (inS) { if (es) es = false; else if (c === '\\') es = true; else if (c === '"') inS = false; continue; }
+          if (c === '"') inS = true; else if (c === '{') depth++; else if (c === '}') { depth--; if (depth === 0) break; }
+        }
+        var t = str.slice(i, j + 1);
+        if (t.length > 20 && have.indexOf(t.slice(0, 200)) < 0) { R.items.push({ src: '파일 속 흩어진 조각', name: '숨은 JSON', value: t, partial: depth !== 0 }); have += t; }
+        i = j + 1;
+      }
+    });
+    var si = str.indexOf('Steps: ');
+    if (si > 0 && have.indexOf('Steps: ') < 0) {
+      var st = Math.max(0, str.lastIndexOf('\u0000', si) + 1), en = str.indexOf('\u0000', si); if (en < 0) en = Math.min(str.length, si + 3000);
+      R.items.push({ src: '파일 속 흩어진 조각', name: '생성 설정 글', value: str.slice(st, en) });
+    }
+  }
+
+  /* ---------- 픽셀 속에 숨긴 정보 ---------- */
+  var MAGICS = { stealth_pnginfo: ['alpha', false], stealth_pngcomp: ['alpha', true], stealth_rgbinfo: ['rgb', false], stealth_rgbcomp: ['rgb', true] };
+  function bitReader(px, w, h, mode, order) {
+    var per = mode === 'alpha' ? 1 : 3, total = w * h * per;
+    return {
+      total: total,
+      get: function (n) {
+        var p = Math.floor(n / per), ch = mode === 'alpha' ? 3 : n % per;
+        var x, y; if (order === 'col') { x = Math.floor(p / h); y = p % h; } else { y = Math.floor(p / w); x = p % w; }
+        return px[(y * w + x) * 4 + ch] & 1;
+      }
+    };
+  }
+  function readBytes(rd, start, count) {
+    var a = new Uint8Array(count);
+    for (var k = 0; k < count; k++) { var v = 0; for (var m = 0; m < 8; m++) v = (v << 1) | rd.get(start + k * 8 + m); a[k] = v; }
+    return a;
+  }
+  async function stealth(px, w, h, hasAlpha) {
+    var tries = [], res = { found: null, notes: [] };
+    if (hasAlpha) tries.push(['alpha', 'col'], ['alpha', 'row']);
+    tries.push(['rgb', 'col'], ['rgb', 'row']);
+    for (var t = 0; t < tries.length; t++) {
+      var rd = bitReader(px, w, h, tries[t][0], tries[t][1]);
+      if (rd.total < 200) continue;
+      var magic = String.fromCharCode.apply(null, readBytes(rd, 0, 15));
+      var info = MAGICS[magic];
+      if (!info || info[0] !== tries[t][0]) continue;
+      var lb = readBytes(rd, 120, 4), bits = u32be(lb, 0), avail = rd.total - 152, partial = false;
+      if (bits > avail) { partial = true; bits = avail; }
+      var data = readBytes(rd, 152, Math.floor(bits / 8));
+      if (info[1]) { var r = await inflate(data, 'gzip'); partial = partial || r.partial; data = r.data || new Uint8Array(); }
+      res.found = { src: '픽셀 속 숨은 정보 (' + (info[0] === 'alpha' ? '투명도' : '색상') + ')', name: magic, value: U8.decode(data), partial: partial };
+      return res;
+    }
+    if (hasAlpha) {
+      // 지운 흔적: 맨 앞(왼쪽 줄)부터 이어지는 254 구간이 있고, 그 뒤는 전부 255
+      var run = 0, n = w * h;
+      for (var q = 0; q < n; q++) { var x = Math.floor(q / h), y = q % h; if (px[(y * w + x) * 4 + 3] === 254) run++; else break; }
+      var maxX = -1;
+      for (var yy = 0; yy < h; yy++) for (var xx = w - 1; xx > maxX; xx--) if (px[(yy * w + xx) * 4 + 3] !== 255) { maxX = xx; break; }
+      var odd = 0; if (maxX >= 0) for (var yy2 = 0; yy2 < h; yy2++) for (var xx2 = 0; xx2 <= maxX; xx2++) if (px[(yy2 * w + xx2) * 4 + 3] !== 255) odd++;
+      if (maxX >= 0 && maxX < Math.max(24, w * 0.05) && odd > 200) res.notes.push('wiped:' + (maxX + 1));
+      var semi = 0; for (var z = 3; z < px.length; z += 4) if (px[z] !== 255) { semi++; if (semi > 10) break; }
+      if (!semi) res.notes.push('opaque');
+    }
+    return res;
+  }
+
+  /* ---------- 프롬프트 정리 ---------- */
+
+  /* 잘린 JSON에서 건질 수 있는 칸만 건지기 */
+  function unesc(s) { return s.replace(/\\(["\\\/bfnrt]|u[0-9a-fA-F]{4})/g, function (m, c) { return c.length > 1 ? String.fromCharCode(parseInt(c.slice(1), 16)) : ({ b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' }[c] || c); }); }
+  function salvage(t) {
+    var s = t, ci = s.indexOf('"Comment": "'); if (ci < 0) ci = s.indexOf('"Comment":"');
+    if (ci >= 0) s = unesc(s.slice(s.indexOf('"', ci + 10) + 1));
+    var o = {}, got = 0;
+    function str(key) { var re = new RegExp('"' + key + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"?'); var m = s.match(re); if (m) { try { return JSON.parse('"' + m[1] + '"'); } catch (e) { return unesc(m[1]); } } }
+    function num(key) { var m = s.match(new RegExp('"' + key + '"\\s*:\\s*(-?[\\d.]+)')); return m ? +m[1] : undefined; }
+    ['prompt', 'uc', 'sampler', 'noise_schedule'].forEach(function (k) { var v = str(k); if (v !== undefined) { o[k] = v; got++; } });
+    ['steps', 'scale', 'seed', 'width', 'height', 'cfg_rescale'].forEach(function (k) { var v = num(k); if (v !== undefined) { o[k] = v; got++; } });
+    var cc = [], re2 = /"char_caption"\s*:\s*"((?:[^"\\]|\\.)*)"/g, m2;
+    while ((m2 = re2.exec(s))) { try { cc.push({ char_caption: JSON.parse('"' + m2[1] + '"') }); } catch (e) {} }
+    if (cc.length) o.v4_prompt = { caption: { char_captions: cc } };
+    return got ? o : null;
+  }
+  function tryJSON(t) { try { var o = JSON.parse(t); return o && typeof o === 'object' ? o : null; } catch (e) { return null; } }
+  function interpret(items) {
+    var out = { nai: null, sd: null, comfy: null, plain: [] };
+    var byName = {}; items.forEach(function (x) { byName[x.name] = byName[x.name] || x; });
+    items.forEach(function (it) {
+      var v = it.value, o = tryJSON(v);
+      if (o && typeof o.Comment === 'string') { var inner = tryJSON(o.Comment); if (inner) o = inner; }
+      if (o && !out.nai && (o.v4_prompt || o.uc !== undefined || (o.prompt !== undefined && typeof o.prompt === 'string' && o.steps !== undefined))) out.nai = { data: o, from: it };
+      if (o && !out.comfy) {
+        var nodes = o.prompt && typeof o.prompt === 'object' ? o.prompt : o;
+        var texts = [];
+        Object.keys(nodes).forEach(function (k) { var n = nodes[k]; if (n && n.class_type && n.inputs && typeof n.inputs.text === 'string') texts.push({ node: k, cls: n.class_type, text: n.inputs.text }); });
+        if (texts.length) out.comfy = { texts: texts, from: it };
+      }
+      if (!o && !out.sd && /(^|\n)Steps:\s*\d/.test(v)) out.sd = { text: v, from: it };
+    });
+    if (!out.nai) items.forEach(function (it) {
+      if (out.nai || tryJSON(it.value) || !/(prompt|uc|steps)\\?"\s*:/.test(it.value)) return;
+      var sv = salvage(it.value); if (sv) out.nai = { data: sv, from: it, partial: true };
+    });
+    if (!out.nai && byName.Comment) {
+      var c = tryJSON(byName.Comment.value);
+      if (c) { if (!c.prompt && byName.Description) c.prompt = byName.Description.value; out.nai = { data: c, from: byName.Comment }; }
+    }
+    return out;
+  }
+  function splitSD(t) {
+    var pos = t, neg = '', set = '', ni = t.indexOf('Negative prompt:'), si = t.search(/\n?Steps:\s*\d/);
+    if (si >= 0) { set = t.slice(si).trim(); pos = t.slice(0, si); }
+    if (ni >= 0 && (si < 0 || ni < si)) { neg = t.slice(ni + 16, si >= 0 ? si : undefined).trim(); pos = t.slice(0, ni); }
+    return { pos: pos.trim(), neg: neg, set: set };
+  }
+
+  var NAI_SIZES = ['832x1216', '1216x832', '1024x1024', '512x768', '768x512', '640x640', '1024x1536', '1536x1024', '1472x1472', '1088x1920', '1920x1088', '512x512', '768x768', '640x896', '896x640', '1024x640', '640x1024'];
+  function isNaiSize(w, h) {
+    for (var k = 1; k <= 4; k++) if (NAI_SIZES.indexOf((w / k) + 'x' + (h / k)) >= 0) return true;
+    return false;
+  }
+
+  /* ---------- 전체 분석 ---------- */
+  async function analyzeBytes(b, name) {
+    var R = { name: name, size: b.length, type: '알 수 없음', items: [], structure: [], trailing: null, width: 0, height: 0 };
+    if (b[0] === 0x89 && asc(b, 1, 3) === 'PNG') { R.type = 'PNG'; await parsePNG(b, R); }
+    else if (b[0] === 0xFF && b[1] === 0xD8) { R.type = 'JPG'; parseJPEG(b, R); }
+    else if (asc(b, 0, 4) === 'RIFF' && asc(b, 8, 4) === 'WEBP') { R.type = 'WebP'; parseWebP(b, R); }
+    else if (asc(b, 4, 4) === 'ftyp') R.type = asc(b, 8, 4).indexOf('avi') === 0 ? 'AVIF' : 'HEIC/AVIF';
+    else if (asc(b, 0, 3) === 'GIF') R.type = 'GIF';
+    if (R.trailing && R.trailing.length) {
+      var tt = U8.decode(R.trailing);
+      R.items.push({ src: '파일 끝 뒤에 붙은 데이터', name: R.trailing.length + '바이트', value: printableRatio(tt) > .85 ? tt : '(글자가 아닌 데이터 ' + R.trailing.length + '바이트)' });
+    }
+    scanLoose(b, R);
+    return R;
+  }
+
+  function diagnose(R, px, st, found) {
+    var d = [];
+    var sw = R.items.filter(function (x) { return x.name === '프로그램' || x.name === 'Software'; }).map(function (x) { return x.value; });
+    var swNames = { 'Celsys': '클립 스튜디오', 'Photoshop': '포토샵', 'GIMP': '김프', 'BandiView': '반디뷰', 'Picasa': '피카사', 'paint.net': '페인트닷넷', 'Snapseed': '스냅시드', 'Android': '안드로이드 기본 편집', 'iOS': '아이폰 편집', 'Lightroom': '라이트룸', 'Ibis': '이비스페인트', 'Procreate': '프로크리에이트' };
+    sw.forEach(function (s) {
+      if (/NovelAI/i.test(s)) return;
+      var nice = ''; Object.keys(swNames).forEach(function (k) { if (s.indexOf(k) >= 0) nice = swNames[k]; });
+      d.push('「' + s + '」' + (nice ? '(' + nice + ')' : '') + ' 프로그램으로 다시 저장된 파일이에요.' + (found ? ' 그래도 정보가 함께 옮겨져 남아 있었어요.' : ' 다시 저장할 때 원래 정보가 덮였을 가능성이 커요.'));
+    });
+    if (R.width && R.height && !isNaiSize(R.width, R.height)) d.push('크기가 ' + R.width + '×' + R.height + '로 노벨AI 기본 크기가 아니에요. 잘리거나 크기가 바뀐 그림이에요.');
+    if (R.type === 'WebP' && R.lossy && !found) d.push('손실 압축 WebP예요. 색은 조금씩 바뀌지만 투명도는 그대로 보관되기도 해서 확인했는데, 숨은 정보는 없었어요.');
+    if (R.type === 'JPG' && !found) d.push('JPG는 투명도가 없고 색도 조금씩 바뀌는 형식이라, 픽셀 속 숨은 정보는 남을 수 없어요. 글 정보 칸만 확인할 수 있어요.');
+    if (st) {
+      st.notes.forEach(function (n) {
+        if (n.indexOf('wiped:') === 0) d.push('투명도 맨 왼쪽 ' + n.slice(6) + '줄에만 미세하게 다른 점들이 몰려 있어요. 노벨AI가 숨은 정보를 새기는 바로 그 자리라, 정보가 있었던 흔적이에요. 하지만 앞부분(정보의 시작 표시)이 지워지거나 망가져 있어서 읽어낼 수 없어요. 다른 프로그램을 거치며 손상된 걸로 보여요.');
+        if (n === 'opaque') d.push('투명도 칸은 있지만 전부 꽉 찬 상태라 숨은 정보가 없어요.');
+      });
+      if (!found && !st.hasAlpha && (R.type === 'PNG' || (R.type === 'WebP' && !R.lossy))) d.push('투명도 정보가 없는 파일이에요. 노벨AI의 픽셀 속 정보가 들어갈 자리가 없어요.');
+    }
+    if (!found && /^image(\s*\(\d+\))?\.(png|jpe?g)$/i.test(R.name)) d.push('파일 이름이 "' + R.name + '"예요. 그림을 복사해서 붙여넣으면 이런 이름이 생기는데, 그때 정보가 전부 빠져요.');
+    if (R.c2pa) d.push('콘텐츠 출처(C2PA) 정보가 들어 있어요. 일부 사이트가 업로드할 때 넣는 정보예요.');
+    return d;
+  }
+
+  return { analyzeBytes: analyzeBytes, stealth: stealth, interpret: interpret, splitSD: splitSD, diagnose: diagnose, tryJSON: tryJSON };
+})();
+
+</script>
+<script>
+(function(){
+var $res=document.getElementById('results'),copyStore={},cid=0;
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function kb(n){return n<1024?n+'B':n<1048576?(n/1024).toFixed(1)+'KB':(n/1048576).toFixed(2)+'MB'}
+function card(title,text){
+  if(text===undefined||text===null||!String(text).trim())return'';
+  var id='c'+(++cid);copyStore[id]=String(text);
+  return'<section class="card"><div class="card-h"><h2>'+esc(title)+'</h2><button class="copy" type="button" data-copy="'+id+'">복사</button></div><pre>'+esc(text)+'</pre></section>';
+}
+function grid(pairs){
+  var h='';pairs.forEach(function(p){if(p[1]!==undefined&&p[1]!==null&&p[1]!=='')h+='<div><dt>'+esc(p[0])+'</dt><dd>'+esc(p[1])+'</dd></div>'});
+  return h?'<section class="card"><div class="card-h"><h2>설정값</h2></div><dl class="grid">'+h+'</dl></section>':'';
+}
+function renderNai(d){
+  var v4=d.v4_prompt&&d.v4_prompt.caption,v4n=d.v4_negative_prompt&&d.v4_negative_prompt.caption;
+  var h=card('프롬프트',d.prompt||(v4&&v4.base_caption));
+  if(v4&&v4.char_captions)v4.char_captions.forEach(function(c,i){h+=card('캐릭터 '+(i+1)+' 프롬프트',c.char_caption)});
+  h+=card('네거티브(빼고 싶은 것)',d.uc||(v4n&&v4n.base_caption));
+  if(v4n&&v4n.char_captions)v4n.char_captions.forEach(function(c,i){h+=card('캐릭터 '+(i+1)+' 네거티브',c.char_caption)});
+  h+=grid([['크기',d.width&&d.height?d.width+' × '+d.height:''],['스텝',d.steps],['가이던스',d.scale],['리스케일',d.cfg_rescale],['시드',d.seed],['샘플러',d.sampler],['노이즈',d.noise_schedule]]);
+  return h;
+}
+function renderFile(R,I,diag,sample){
+  var found=I.nai||I.sd||I.comfy,partial=(I.nai&&I.nai.partial)||R.items.some(function(x){return x.partial});
+  var h='<article class="file"><div class="fhead"><b>'+esc(R.name)+'</b>'+(sample?'<span class="tag">예시</span>':'')+
+    '<span>'+esc(R.type)+(R.width?' · '+R.width+'×'+R.height:'')+' · '+kb(R.size)+'</span><button class="del" type="button" data-del>지우기</button></div>';
+  if(found){
+    var src=(I.nai||I.sd||I.comfy).from.src;
+    h+='<div class="status'+(partial?' part':'')+'"><span class="dot"></span><div><b>'+(partial?'정보를 일부만 건졌어요':'프롬프트 정보를 찾았어요')+'</b><small>'+
+      (sample?'대화에 올려주신 카톡 사진으로 돌린 예시예요. 다른 파일을 넣으면 그 결과가 위에 쌓여요. ':'')+
+      '찾은 곳: '+esc(src)+(partial?' · 그림이 잘려서 뒷부분이 끊겼어요. 남아 있는 칸만 보여드려요.':'')+'</small></div></div>';
+    if(I.nai)h+=renderNai(I.nai.data);
+    if(I.sd){var s=CoreSplit(I.sd.text);h+=card('프롬프트',s.pos)+card('네거티브(빼고 싶은 것)',s.neg)+card('설정값',s.set)}
+    if(I.comfy)I.comfy.texts.forEach(function(t){h+=card('ComfyUI 글 입력 · 노드 '+t.node+' ('+t.cls+')',t.text)});
+  }else{
+    var any=R.items.length;
+    h+='<div class="status no"><span class="dot"></span><div><b>프롬프트 정보는 남아 있지 않아요</b><small>'+
+      (any?'파일 속 정보 '+any+'개를 전부 확인했지만 그림 생성 정보는 없었어요. 아래 "파일 속 정보 전부"에서 직접 보실 수 있어요.':'파일 안에 글 정보가 한 칸도 없어요.')+'</small></div></div>';
+  }
+  if(diag.length)h+='<div class="diag"><h3>'+(found?'참고':'왜 없는지')+'</h3><ul>'+diag.map(function(x){return'<li>'+esc(x)+'</li>'}).join('')+'</ul></div>';
+  if(R.items.length){
+    h+='<details><summary>파일 속 정보 전부 ('+R.items.length+'개)</summary><div class="tbl-wrap"><table><thead><tr><th>위치</th><th>이름</th><th>내용</th></tr></thead><tbody>';
+    R.items.forEach(function(x){h+='<tr><td class="n">'+esc(x.src)+'</td><td class="n">'+esc(x.name)+(x.partial?' <span class="tag">일부</span>':'')+'</td><td class="v"><span class="more">'+esc(x.value.length>20000?x.value.slice(0,20000)+'…':x.value)+'</span></td></tr>'});
+    h+='</tbody></table></div></details>';
+  }
+  if(R.structure.length){
+    h+='<details><summary>파일 구조 ('+R.structure.length+'조각)</summary><div class="tbl-wrap"><table><thead><tr><th>조각</th><th>크기</th><th>뜻</th></tr></thead><tbody>';
+    var st=R.structure,shown=0;
+    for(var i=0;i<st.length;i++){
+      var j=i;while(j+1<st.length&&st[j+1].name===st[i].name)j++;
+      var n=j-i+1,size=0;for(var k=i;k<=j;k++)size+=st[k].size;
+      h+='<tr><td class="n">'+esc(st[i].name)+(n>1?' ×'+n:'')+'</td><td class="n">'+kb(size)+'</td><td>'+esc(st[i].note)+'</td></tr>';i=j;
+    }
+    h+='</tbody></table></div></details>';
+  }
+  return h+'</article>';
+}
+function CoreSplit(t){return MetaCore.splitSD(t)}
+
+async function pixels(blob){
+  if(typeof createImageBitmap==='undefined')return null;
+  var bmp;try{bmp=await createImageBitmap(blob,{premultiplyAlpha:'none',colorSpaceConversion:'none'})}catch(e){try{bmp=await createImageBitmap(blob)}catch(e2){return null}}
+  var c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;
+  var ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(bmp,0,0);
+  return{px:ctx.getImageData(0,0,c.width,c.height).data,w:c.width,h:c.height};
+}
+async function analyze(blob,name,sample){
+  var b=new Uint8Array(await blob.arrayBuffer());
+  var R=await MetaCore.analyzeBytes(b,name),st=null;
+  if(R.type!=='JPG'){
+    var P=await pixels(blob);
+    if(P){
+      var hasA=false;
+      if(R.type==='PNG')hasA=R.colorType===4||R.colorType===6;
+      else{for(var z=3;z<P.px.length;z+=4)if(P.px[z]!==255){hasA=true;break}
+        if(!hasA)hasA=R.structure.some(function(s){return s.name==='ALPH'})}
+      st=await MetaCore.stealth(P.px,P.w,P.h,hasA);st.hasAlpha=hasA;
+      if(st.found)R.items.unshift(st.found);
+    }
+  }
+  var I=MetaCore.interpret(R.items);
+  var diag=MetaCore.diagnose(R,null,st,!!(I.nai||I.sd||I.comfy));
+  return renderFile(R,I,diag,sample);
+}
+async function run(files){
+  files=[].slice.call(files);if(!files.length)return;
+  var hold=document.createElement('div');hold.className='file';
+  hold.innerHTML='<div class="status"><span class="dot"></span><div><b>뜯어보는 중…</b><small>'+files.length+'개 파일</small></div></div>';
+  $res.prepend(hold);
+  var out='';
+  for(var i=0;i<files.length;i++){
+    try{out+=await analyze(files[i],files[i].name||'붙여넣은 그림',false)}
+    catch(e){out+='<article class="file"><div class="fhead"><b>'+esc(files[i].name||'파일')+'</b><button class="del" type="button" data-del>지우기</button></div><div class="status no"><span class="dot"></span><div><b>파일을 읽지 못했어요</b><small>이미지 파일이 맞는지 확인하고 다시 넣어 주세요.</small></div></div></article>'}
+  }
+  var sm=$res.querySelector('[data-sample]');if(sm)sm.remove();
+  hold.outerHTML=out;
+  updateBar();
+}
+
+var pick=document.getElementById('pick'),drop=document.getElementById('drop');
+pick.addEventListener('change',function(){run(pick.files);pick.value=''});
+['dragenter','dragover'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.add('over')})});
+['dragleave','drop'].forEach(function(e){drop.addEventListener(e,function(ev){ev.preventDefault();drop.classList.remove('over')})});
+drop.addEventListener('drop',function(ev){run(ev.dataTransfer.files)});
+document.addEventListener('paste',function(ev){
+  var fs=[].slice.call(ev.clipboardData.files||[]);
+  if(!fs.length)fs=[].slice.call(ev.clipboardData.items||[]).filter(function(i){return i.kind==='file'}).map(function(i){return i.getAsFile()});
+  if(fs.length)run(fs);
+});
+function updateBar(){
+  var n=$res.querySelectorAll('article.file').length,bar=document.getElementById('bar');
+  bar.hidden=n===0;document.getElementById('barText').textContent='결과 '+n+'개 · 화면에만 있고 어디에도 저장되지 않아요';
+}
+document.getElementById('clearAll').addEventListener('click',function(){$res.innerHTML='';copyStore={};updateBar();document.getElementById('pick').focus();});
+$res.addEventListener('click',function(ev){
+  var d=ev.target.closest('[data-del]');
+  if(d){var a=d.closest('article.file'),box=a.parentNode;a.remove();if(box&&box.hasAttribute&&box.hasAttribute('data-sample')&&!box.children.length)box.remove();updateBar();return;}
+  var btn=ev.target.closest('[data-copy]');if(!btn)return;
+  var text=copyStore[btn.getAttribute('data-copy')],pre=btn.closest('.card').querySelector('pre');
+  function ok(){btn.textContent='복사됨';btn.classList.add('done');setTimeout(function(){btn.textContent='복사';btn.classList.remove('done')},1400)}
+  function fallback(){var r=document.createRange();r.selectNodeContents(pre);var s=getSelection();s.removeAllRanges();s.addRange(r);btn.textContent='선택됨 · 길게 눌러 복사'}
+  try{navigator.clipboard.writeText(text).then(ok,fallback)}catch(e){fallback()}
+});
+
+})();
+</script>
+
+</body>
+</html>
